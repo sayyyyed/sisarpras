@@ -1,0 +1,14 @@
+{
+  "name": "sisarpras",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistem Informasi Sarana & Prasarana — manajemen aset, ruangan, stok, dan pengadaan",
+  "scripts": {
+    "dev": "pnpm --filter @sisarpras/client dev",
+    "dev:client": "pnpm --filter @sisarpras/client dev",
+    "dev:desktop": "pnpm --filter @sisarpras/client tauri:dev",
+    "dev:api": "pnpm --filter @sisarpras/api dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

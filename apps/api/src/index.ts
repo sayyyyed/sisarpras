@@ -1,0 +1,44 @@
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { pingDatabase } from "@/db/client";
+import { assetsRoute } from "@/routes/assets";
+import { locationsRoute } from "@/routes/locations";
+import { stockRoute } from "@/routes/stock";
+import { syncRoute } from "@/routes/sync";
+import { authRoute } from "@/routes/auth";
+
+const app = new Hono();
+
+app.use("*", cors());
+
+/**
+ * Liveness + readiness in one: a 503 with the driver's message is far more
+ * useful than a 200 that hides a dead database.
+ */
+app.get("/health", async (c) => {
+  const database = await pingDatabase();
+  return c.json(
+    {
+      status: database.ok ? "ok" : "degraded",
+      service: "sisarpras-api",
+      version: "0.1.0",
+      database,
+    },
+    database.ok ? 200 : 503,
+  );
+});
+
+app.route("/v1/assets", assetsRoute);
+app.route("/v1/locations", locationsRoute);
+app.route("/v1/stock", stockRoute);
+app.route("/v1/auth", authRoute);
+app.route("/v1/sync", syncRoute);
+
+const port = Number(process.env.PORT ?? 8787);
+
+serve({ fetch: app.fetch, port }, (info) => {
+  console.log(`SI SARPRAS API siap di http://localhost:${info.port}`);
+});
+
+export default app;
