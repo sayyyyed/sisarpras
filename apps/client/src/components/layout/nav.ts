@@ -8,6 +8,7 @@ import {
   RiShoppingCartLine,
   RiStackLine,
   RiTeamLine,
+  RiHandCoinLine,
 } from "@remixicon/react";
 import type { DashboardNavItem } from "@/components/application/dashboard/dashboard-sidebar";
 
@@ -19,6 +20,7 @@ export const APP_NAV_ITEMS: DashboardNavItem[] = [
   { key: "procurement", label: "Pengadaan", icon: RiShoppingCartLine, href: "/procurement" },
   { key: "labels", label: "Label & Barcode", icon: RiQrCodeLine, href: "/labels" },
   { key: "stock", label: "Stok", icon: RiStackLine, href: "/stock" },
+  { key: "loans", label: "Peminjaman", icon: RiHandCoinLine, href: "/loans" },
   { key: "sync", label: "Sinkronisasi", icon: RiRefreshLine, href: "/sync" },
   { key: "reports", label: "Laporan", icon: RiBarChart2Line, href: "/reports" },
   { key: "users", label: "Manajemen User", icon: RiTeamLine, href: "/users" },
@@ -31,6 +33,7 @@ export function navKeyForPath(pathname: string): string {
   if (pathname.startsWith("/procurement")) return "procurement";
   if (pathname.startsWith("/labels")) return "labels";
   if (pathname.startsWith("/stock")) return "stock";
+  if (pathname.startsWith("/loans")) return "loans";
   if (pathname.startsWith("/sync")) return "sync";
   if (pathname.startsWith("/reports")) return "reports";
   if (pathname.startsWith("/settings")) return "settings";
@@ -60,6 +63,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "/procurement": "Pengadaan",
   "/labels": "Label & Barcode",
   "/stock": "Stok",
+  "/loans": "Peminjaman",
   "/sync": "Sinkronisasi",
   "/reports": "Laporan",
   "/settings": "Pengaturan",

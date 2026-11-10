@@ -1,0 +1,65 @@
+.login-aurora-backdrop {
+  background:
+    radial-gradient(circle 22rem at var(--aurora-pointer-x, 50%) var(--aurora-pointer-y, 25%), rgb(61 163 224 / 15%), transparent 70%),
+    radial-gradient(ellipse at 14% 18%, rgb(59 130 246 / 35%), transparent 45%),
+    radial-gradient(ellipse at 84% 22%, rgb(34 166 153 / 32%), transparent 42%),
+    radial-gradient(ellipse at 52% 64%, rgb(96 165 250 / 20%), transparent 58%);
+  overflow: hidden;
+}
+
+.dark .login-aurora-backdrop {
+  background:
+    radial-gradient(circle 22rem at var(--aurora-pointer-x, 50%) var(--aurora-pointer-y, 25%), rgb(84 116 238 / 16%), transparent 70%),
+    radial-gradient(ellipse at 14% 18%, rgb(83 67 185 / 32%), transparent 45%),
+    radial-gradient(ellipse at 84% 22%, rgb(19 116 119 / 30%), transparent 42%),
+    radial-gradient(ellipse at 52% 64%, rgb(48 73 154 / 18%), transparent 58%);
+}
+
+.login-aurora-backdrop canvas {
+  z-index: 1;
+}
+
+.login-aurora-backdrop::before,
+.login-aurora-backdrop::after {
+  content: "";
+  position: absolute;
+  top: -20%;
+  left: -15%;
+  width: 130%;
+  height: 76%;
+  border-radius: 45% 55% 60% 40%;
+  filter: blur(48px);
+  transform-origin: center top;
+  animation: login-aurora-drift 16s ease-in-out infinite alternate;
+}
+
+.login-aurora-backdrop::before {
+  background: linear-gradient(105deg, transparent 5%, rgb(56 116 230 / 38%) 28%, rgb(32 178 158 / 42%) 57%, transparent 86%);
+}
+
+.login-aurora-backdrop::after {
+  top: -30%;
+  left: 5%;
+  width: 115%;
+  background: linear-gradient(75deg, transparent 12%, rgb(100 177 250 / 34%) 40%, rgb(40 164 150 / 30%) 68%, transparent 92%);
+  animation-delay: -8s;
+  animation-duration: 21s;
+}
+
+.dark .login-aurora-backdrop::before {
+  background: linear-gradient(105deg, transparent 5%, rgb(86 68 208 / 34%) 28%, rgb(26 149 145 / 32%) 57%, transparent 86%);
+}
+
+.dark .login-aurora-backdrop::after {
+  background: linear-gradient(75deg, transparent 12%, rgb(80 103 215 / 30%) 40%, rgb(38 137 149 / 25%) 68%, transparent 92%);
+}
+
+@keyframes login-aurora-drift {
+  from { transform: translate3d(-7%, -3%, 0) rotate(-8deg) scale(1); }
+  to { transform: translate3d(8%, 12%, 0) rotate(8deg) scale(1.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-aurora-backdrop::before,
+  .login-aurora-backdrop::after { animation: none; }
+}

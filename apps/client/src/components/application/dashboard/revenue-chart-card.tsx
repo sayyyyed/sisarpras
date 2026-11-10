@@ -42,21 +42,7 @@ export type RevenuePoint = {
   previous: number;
 };
 
-/** Twelve months that add up to the stat cards' total revenue. */
-export const REVENUE_DATA: RevenuePoint[] = [
-  { label: "Jan", current: 9840, previous: 8210 },
-  { label: "Feb", current: 10120, previous: 8460 },
-  { label: "Mar", current: 11380, previous: 9950 },
-  { label: "Apr", current: 10960, previous: 10240 },
-  { label: "May", current: 12210, previous: 10880 },
-  { label: "Jun", current: 12740, previous: 11020 },
-  { label: "Jul", current: 13980, previous: 11760 },
-  { label: "Aug", current: 13120, previous: 12030 },
-  { label: "Sep", current: 14210, previous: 12190 },
-  { label: "Oct", current: 14690, previous: 12480 },
-  { label: "Nov", current: 14360, previous: 12160 },
-  { label: "Dec", current: 14703.92, previous: 11924 },
-];
+const EMPTY_DATA: RevenuePoint[] = MONTHS.map((label) => ({ label, current: 0, previous: 0 }));
 
 const formatK = (value: number) => (value >= 1000 ? `${Math.round(value / 1000)}k` : `${value}`);
 const formatMoney = (value: number) =>
@@ -85,11 +71,11 @@ function ActiveDot({ cx: x, cy: y }: { cx?: number; cy?: number }) {
 }
 
 export function RevenueChartCard({
-  data = REVENUE_DATA,
-  title = "Revenue",
+  data = EMPTY_DATA,
+  title = "Ringkasan",
   className,
 }: {
-  /** Twelve points, one per month; defaults to the demo year. */
+  /** Twelve points, one per month. */
   data?: RevenuePoint[];
   /** Headline label when no month is hovered. */
   title?: string;

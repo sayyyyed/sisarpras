@@ -16,17 +16,14 @@ import {
   RiCalendarLine,
   RiChatAiLine,
   RiCloseLine,
-  RiCustomerServiceLine,
   RiHomeLine,
   RiImageAiLine,
   RiKanbanView2,
   RiMegaphoneLine,
   RiSearchLine,
-  RiSettings4Line,
   RiSideBarFill,
   RiUserSmileLine,
 } from "@remixicon/react";
-import { SettingsModal } from "@/components/application/settings/settings-modal";
 import { ThemeToggle } from "@/components/application/theme/theme-toggle";
 import { Badge } from "@/components/base/badges/badge";
 import { CloseButton } from "@/components/base/buttons/close-button";
@@ -155,7 +152,7 @@ export type DashboardNavKey = string;
 
 /** The Pro dashboard's navigation, the default set. */
 export const DASHBOARD_NAV: DashboardNavItem[] = [
-  { key: "home", label: "Home", icon: RiHomeLine, href: "/templates/dashboard", badge: 152 },
+  { key: "home", label: "Home", icon: RiHomeLine, href: "/templates/dashboard" },
   { key: "project-board", label: "Project board", icon: RiKanbanView2, href: "/templates/project-board" },
   { key: "marketing", label: "Marketing", icon: RiMegaphoneLine, href: "/templates/marketing" },
   { key: "calendar", label: "Calendar", icon: RiCalendarLine, href: "/templates/calendar" },
@@ -242,7 +239,6 @@ export function DashboardSidebar({
 } = {}) {
   const localize = useTemplateCopy();
   const [collapsedState, setCollapsed] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [suppressUserHover, setSuppressUserHover] = useState(false);
   const [searchActive, setSearchActive] = useState(false);
   const [query, setQuery] = useState("");
@@ -373,7 +369,7 @@ export function DashboardSidebar({
                 ref={searchTriggerRef}
                 type="button"
                 aria-label="Search"
-                onClick={activateSearch}
+                onClick={() => window.dispatchEvent(new CustomEvent("sisarpras:open-search"))}
                 className="flex size-5 shrink-0 cursor-pointer items-center justify-center text-foreground-icon-secondary"
               >
                 <RiSearchLine className="size-5" aria-hidden />
@@ -479,7 +475,7 @@ export function DashboardSidebar({
               type="button"
               aria-label="Cari cepat"
               title={collapsed ? "Cari cepat" : undefined}
-              onClick={activateSearch}
+              onClick={() => window.dispatchEvent(new CustomEvent("sisarpras:open-search"))}
               className={cx(
                 "flex cursor-pointer items-center gap-2 p-2 hover:bg-background-tertiary-hover/55",
                 "transition-[width,border-radius,background-color] duration-300 ease-in-out",
@@ -506,7 +502,7 @@ export function DashboardSidebar({
               collapsed column is exactly as wide as a 36px item, so padding
               here pushes every item 2px right and the rail's own clip shaves
               that much off its selected fill and hover state. */}
-          <nav className={cx("flex w-full flex-col gap-1", !collapsed && "px-0.5")}>
+          <nav className={cx("mt-2 flex w-full flex-col gap-1", !collapsed && "px-0.5")}>
             <NavRows
               items={items}
               query={normalizedQuery}
@@ -529,19 +525,7 @@ export function DashboardSidebar({
             />
           ))}
         {/* Secondary nav */}
-        <nav className="flex w-full flex-col gap-1">
-          {matches("Bantuan") && (
-            <NavItem icon={RiCustomerServiceLine} label="Bantuan" collapsed={collapsed} />
-          )}
-          {matches("Pengaturan") && (
-            <NavItem
-              icon={RiSettings4Line}
-              label="Pengaturan"
-              collapsed={collapsed}
-              onClick={() => setSettingsOpen(true)}
-            />
-          )}
-        </nav>
+        <nav className="flex w-full flex-col gap-1" />
 
         {/* Team card → opens the profile menu next to the sidebar */}
         <DashboardTeamMenu
@@ -550,11 +534,6 @@ export function DashboardSidebar({
         />
       </div>
 
-      <SettingsModal
-        isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        planArtSrc="/templates/settings-plan-art.png"
-      />
     </aside>
   ));
 }

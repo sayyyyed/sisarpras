@@ -5,17 +5,10 @@ import { useTemplateCopy, useTemplateLanguageSelector } from "@/components/found
 import { useDirection } from "@/components/foundations/direction/direction";
 import { useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react";
 import {
-  RiBankCardLine,
   RiBankLine,
-  RiBox3Line,
-  RiFolder6Line,
-  RiGroupLine,
   RiLogoutBoxRLine,
-  RiMessage2Line,
-  RiNotification3Line,
   RiPaletteLine,
   RiSchoolLine,
-  RiShieldUserLine,
 } from "@remixicon/react";
 import {
   Button as AriaButton,
@@ -25,14 +18,18 @@ import {
 } from "react-aria-components";
 import { ThemeToggle } from "@/components/application/theme/theme-toggle";
 import { Avatar } from "@/components/base/avatar/avatar";
-import { Badge } from "@/components/base/badges/badge";
 import { ChevronDownSmall } from "@/components/foundations/icons/chevrons";
 import { cx } from "@/utils/cx";
+import { useCompanyProfile } from "@/lib/company";
+import { OPEN_COMPANY_EVENT } from "@/components/layout/company-modal";
+import { useApp } from "@/lib/store";
+import { StatusDot } from "@/components/base/badges/status-dot";
+import { useAuth } from "@/lib/auth";
 
 /**
  * Figma source: Board UI → sidebar profile menu (node 3823:3699).
  *
- * Dropdown opened from the sidebar's "Dinas Sarpras" card. Floats to the right of
+ * Dropdown opened from the sidebar summary card. Floats to the right of
  * the sidebar: white panel, 1px border/button/default, radius 16, p 10,
  * shadow/dropdown. Header (team avatar + name/email), three grouped sections of
  * sidebar-style rows separated by full-bleed dividers, and a "BoardUI" + version
@@ -49,7 +46,6 @@ type IconComponent = ComponentType<{
 type MenuRow = {
   icon: IconComponent;
   label: string;
-  badge?: string;
   isSelected?: boolean;
 };
 
@@ -62,30 +58,17 @@ type MenuGroup = {
 const GROUPS: MenuGroup[] = [
   {
     id: "workspace",
-    items: [
-      { icon: RiBankLine, label: "View team profile" },
-      { icon: RiFolder6Line, label: "Folders" },
-      { icon: RiMessage2Line, label: "Messages", badge: "94" },
-      { icon: RiGroupLine, label: "People" },
-    ],
+    items: [{ icon: RiBankLine, label: "View team profile" }],
   },
   {
     id: "company",
     label: "Company",
-    items: [
-      { icon: RiBankCardLine, label: "Billing" },
-      { icon: RiSchoolLine, label: "Company Details" },
-      { icon: RiBox3Line, label: "Integrations" },
-    ],
+    items: [{ icon: RiSchoolLine, label: "Company Details" }],
   },
   {
     id: "personal",
     label: "Personal",
-    items: [
-      { icon: RiNotification3Line, label: "Notifications" },
-      { icon: RiShieldUserLine, label: "Account Details" },
-      { icon: RiLogoutBoxRLine, label: "Sign out" },
-    ],
+    items: [{ icon: RiLogoutBoxRLine, label: "Sign out" }],
   },
 ];
 
@@ -104,7 +87,7 @@ function Collapsible({ collapsed, children }: { collapsed: boolean; children: Re
   ));
 }
 
-function TeamMenuItem({ icon: Icon, label, badge, isSelected, onSelect }: MenuRow & { onSelect: () => void }) {
+function TeamMenuItem({ icon: Icon, label, isSelected, onSelect }: MenuRow & { onSelect: () => void }) {
   const localize = useTemplateCopy();
   return localize((
     <AriaButton
@@ -122,14 +105,6 @@ function TeamMenuItem({ icon: Icon, label, badge, isSelected, onSelect }: MenuRo
         <Icon className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
         <span className="truncate text-body-medium text-text-primary">{label}</span>
       </span>
-      {badge && (
-        <Badge
-          color="neutral"
-          className="bg-team-menu-count-background text-team-menu-count-foreground"
-        >
-          {badge}
-        </Badge>
-      )}
     </AriaButton>
   ));
 }
@@ -154,6 +129,11 @@ export function DashboardTeamMenu({
   const localize = useTemplateCopy();
   const languageSelector = useTemplateLanguageSelector();
   const direction = useDirection();
+  const company = useCompanyProfile();
+  const { logout } = useAuth();
+  const { assets, outbox, source, online } = useApp();
+  const pendingSync = outbox.filter((item) => item.status === "pending" || item.status === "conflict").length;
+  const isSynced = source === "api" && online && pendingSync === 0;
   const [isOpen, setIsOpen] = useState(false);
   // "right" placement assumes room to the sidebar's right (true in-flow on
   // desktop) — on mobile the sidebar can span the full viewport, so the
@@ -164,7 +144,7 @@ export function DashboardTeamMenu({
   return localize((
     <AriaDialogTrigger isOpen={isOpen} onOpenChange={setIsOpen}>
       <AriaButton
-        aria-label="Dinas Sarpras"
+        aria-label={company.name}
         className={cx(
           "flex cursor-pointer items-center overflow-hidden outline-none",
           "border-2 border-transparent hover:border-border-button-hover",
@@ -177,11 +157,15 @@ export function DashboardTeamMenu({
         )}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <Avatar size="md" color="blue" src="/brand/boardui_logo_circle.webp" alt="Dinas Sarpras" />
+          <Avatar size="md" color="blue" src="/brand/boardui_logo_circle.webp" alt={company.name} />
           <Collapsible collapsed={collapsed}>
             <span className="flex min-w-0 flex-col items-start justify-center">
-              <span className="text-body-medium whitespace-nowrap text-text-primary">Dinas Sarpras</span>
-              <span className="text-body-regular whitespace-nowrap text-text-secondary">sarpras@instansi.go.id</span>
+              <span className="text-caption-1-semibold whitespace-nowrap text-text-secondary">Ringkasan</span>
+              <span className="text-body-medium whitespace-nowrap text-text-primary">{assets.length} aset</span>
+              <span className="flex items-center gap-1.5 text-body-2-regular whitespace-nowrap text-text-secondary">
+                <StatusDot color={isSynced ? "green" : "yellow"} />
+                {isSynced ? "Tersinkron" : pendingSync ? `${pendingSync} menunggu sinkronisasi` : "Mode lokal"}
+              </span>
             </span>
           </Collapsible>
         </span>
@@ -205,20 +189,24 @@ export function DashboardTeamMenu({
           "data-[exiting]:opacity-0 data-[exiting]:scale-95 data-[exiting]:blur-[2px]",
         )}
       >
-        <AriaDialog aria-label="Dinas Sarpras menu" className="flex flex-col gap-[7px] outline-none">
+        <AriaDialog aria-label={`${company.name} menu`} className="flex flex-col gap-[7px] outline-none">
           {/* Header */}
           <div className="flex w-full items-center gap-2 px-2 pt-1">
-            <Avatar size="md" color="blue" src="/brand/boardui_logo_circle.webp" alt="Dinas Sarpras" />
+            <Avatar size="md" color="blue" src="/brand/boardui_logo_circle.webp" alt={company.name} />
             <div className="flex min-w-0 flex-col items-start justify-center">
-              <span className="text-body-medium whitespace-nowrap text-text-primary">Dinas Sarpras</span>
-              <span className="text-body-regular whitespace-nowrap text-text-secondary">sarpras@instansi.go.id</span>
+              <span className="text-body-medium whitespace-nowrap text-text-primary">{company.name}</span>
+              <span className="text-body-regular whitespace-nowrap text-text-secondary">{company.email || "Profil instansi"}</span>
             </div>
           </div>
 
           {/* Grouped sidebar-style rows */}
           <div className="flex w-full flex-col">
             {GROUPS.map((group, index) => (
-              <Group key={group.id} group={group} showDivider={index > 0} onSelect={() => setIsOpen(false)}>
+              <Group key={group.id} group={group} showDivider={index > 0} onSelect={(label) => {
+                setIsOpen(false);
+                if (label === "View team profile" || label === "Company Details") window.dispatchEvent(new Event(OPEN_COMPANY_EVENT));
+                if (label === "Sign out") logout();
+              }}>
                 {showThemeToggle && group.id === "personal" && (
                   <div className="flex w-full items-center justify-between gap-2.5 rounded-2lg px-2 py-1">
                     <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -246,7 +234,7 @@ export function DashboardTeamMenu({
   ));
 }
 
-function Group({ group, showDivider, onSelect, children }: { group: MenuGroup; showDivider: boolean; onSelect: () => void; children?: ReactNode }) {
+function Group({ group, showDivider, onSelect, children }: { group: MenuGroup; showDivider: boolean; onSelect: (label: string) => void; children?: ReactNode }) {
   const localize = useTemplateCopy();
   return localize((
     <>
@@ -257,7 +245,7 @@ function Group({ group, showDivider, onSelect, children }: { group: MenuGroup; s
         )}
         <div className="flex w-full flex-col gap-1">
           {group.items.map((item) => (
-            <TeamMenuItem key={item.label} {...item} onSelect={onSelect} />
+            <TeamMenuItem key={item.label} {...item} onSelect={() => onSelect(item.label)} />
           ))}
           {children}
         </div>

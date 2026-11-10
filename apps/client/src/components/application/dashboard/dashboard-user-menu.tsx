@@ -15,6 +15,7 @@ import { Avatar } from "@/components/base/avatar/avatar";
 import { Button } from "@/components/base/buttons/button";
 import { ChevronUpDownSmall } from "@/components/foundations/icons/chevrons";
 import { cx } from "@/utils/cx";
+import sdiLogo from "@/lib/image/logo sdi.png";
 
 /**
  * Figma source: Board UI → sidebar account menu (node 3828:3895).
@@ -173,7 +174,9 @@ export function DashboardUserMenu({
           collapsed && "w-9 justify-center gap-0 before:-inset-x-[3px]",
         )}
       >
-        <Avatar size="md" color="neutral" initials="M" className={avatarClassName} />
+        <span className={cx("flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white", avatarClassName)}>
+          <img src={sdiLogo} alt="" className="size-full object-contain" />
+        </span>
         <Collapsible collapsed={collapsed}>
           <span className="flex items-center gap-0.5">
             <span className="text-body-medium whitespace-nowrap text-text-primary">Admin Sarpras</span>
