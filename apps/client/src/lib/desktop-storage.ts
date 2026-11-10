@@ -63,7 +63,7 @@ export async function writeStoredValue(key: string, value: unknown): Promise<voi
       const rows = value as Array<Record<string, unknown>>;
       for (const row of rows) await db.execute(
         "INSERT INTO assets (id, asset_code, name, category_id, location_id, payload_json, version, created_at, updated_at, deleted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET asset_code=excluded.asset_code,name=excluded.name,category_id=excluded.category_id,location_id=excluded.location_id,payload_json=excluded.payload_json,version=excluded.version,updated_at=excluded.updated_at,deleted_at=excluded.deleted_at",
-        [row.id, row.assetCode, row.name, row.categoryId, row.locationId, JSON.stringify(row), row.version ?? 1, row.createdAt, row.updatedAt, row.deletedAt ?? null],
+        [row.id, row.assetCode, row.name, row.categoryId, row.locationId ?? "", JSON.stringify(row), row.version ?? 1, row.createdAt, row.updatedAt, row.deletedAt ?? null],
       );
       const existing = await db.select<Array<{ id: string }>>("SELECT id FROM assets");
       const keep = new Set(rows.map((row) => String(row.id)));

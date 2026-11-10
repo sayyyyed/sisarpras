@@ -30,12 +30,19 @@ export function summarizeRooms(locations: Location[], assets: Asset[]): RoomSumm
   return locations
     .filter((location) => location.kind === "room" || location.kind === "storage")
     .map((location) => {
-      const inside = assets.filter((asset) => asset.locationId === location.id && !asset.deletedAt);
-      const byCondition = countByCondition(inside);
-      const health = classifyRoom(location, byCondition, inside.length);
+      const byCondition = { ...EMPTY_CONDITION_COUNT };
+      let totalAssets = 0;
+      for (const asset of assets) {
+        if (asset.deletedAt) continue;
+        const allocation = asset.roomStocks.find((item) => item.locationId === location.id);
+        if (!allocation) continue;
+        byCondition[asset.condition] += allocation.quantity;
+        totalAssets += allocation.quantity;
+      }
+      const health = classifyRoom(location, byCondition, totalAssets);
       return {
         location,
-        totalAssets: inside.length,
+        totalAssets,
         byCondition,
         health,
         healthLabel: ROOM_HEALTH_LABEL[health],

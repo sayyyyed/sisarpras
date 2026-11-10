@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiError, apiRequest } from "@/lib/api";
 import { desktopDatabase } from "@/lib/desktop-storage";
+import { DEFAULT_ROLE_MENU_KEYS } from "@sisarpras/domain";
 
 export type UserRole = "admin" | "operator" | "viewer";
-export interface LocalUser { id: string; name: string; role: UserRole; pinHash?: string; createdAt: string; isActive?: boolean; }
+export interface LocalUser { id: string; name: string; role: UserRole; roleId?: string; roleName?: string; menuKeys?: string[]; pinHash?: string; createdAt: string; isActive?: boolean; }
 interface PublicUser extends Omit<LocalUser, "pinHash"> {}
 interface SessionResponse { token: string; user: PublicUser; }
 interface AuthState {
@@ -12,16 +13,49 @@ interface AuthState {
   ready: boolean;
   login: (pin: string) => Promise<boolean>;
   logout: () => void;
-  addUser: (name: string, role: UserRole, pin: string) => Promise<void>;
-  updateUser: (id: string, patch: Partial<Pick<LocalUser, "name" | "role">> & { pin?: string }) => Promise<void>;
+  addUser: (name: string, roleId: string, pin: string) => Promise<void>;
+  updateUser: (id: string, patch: Partial<Pick<LocalUser, "name" | "roleId">> & { pin?: string }) => Promise<void>;
   removeUser: (id: string) => Promise<void>;
+  refreshCurrentUser: () => Promise<void>;
 }
 
 const USERS_KEY = "sisarpras.users.v1";
 const SESSION_KEY = "sisarpras.session.v1";
 const SESSION_USER_KEY = "sisarpras.session-user.v1";
 const TOKEN_KEY = "sisarpras.api-token.v1";
+const ROLES_KEY = "sisarpras.roles.v1";
 const AuthContext = createContext<AuthState | null>(null);
+
+const DEFAULT_ROLE_IDS: Record<UserRole, string> = {
+  admin: "00000000-0000-4000-8000-000000000001",
+  operator: "00000000-0000-4000-8000-000000000002",
+  viewer: "00000000-0000-4000-8000-000000000003",
+};
+
+function normalizeLocalUser(user: LocalUser): LocalUser {
+  const roleMenus = user.menuKeys ?? DEFAULT_ROLE_MENU_KEYS[user.role];
+  let menuKeys = roleMenus;
+  try {
+    const menuState = JSON.parse(localStorage.getItem("sisarpras.menu-state.v1") ?? "null") as Array<{ key: string; enabled: boolean }> | null;
+    if (menuState) {
+      const enabled = new Set(menuState.filter((menu) => menu.enabled || menu.key === "dashboard" || menu.key === "users").map((menu) => menu.key));
+      menuKeys = roleMenus.filter((key) => enabled.has(key));
+    }
+  } catch { /* Use the last cached role menu list. */ }
+  return {
+    ...user,
+    roleId: user.roleId ?? DEFAULT_ROLE_IDS[user.role],
+    roleName: user.roleName ?? ({ admin: "Admin", operator: "Operator", viewer: "Viewer" }[user.role]),
+    menuKeys,
+  };
+}
+
+function cachedRole(roleId: string): { name: string; accessLevel: UserRole; menuKeys: string[] } | undefined {
+  try {
+    const roles = JSON.parse(localStorage.getItem(ROLES_KEY) ?? "[]") as Array<{ id: string; name: string; accessLevel: UserRole; menuKeys: string[] }>;
+    return roles.find((role) => role.id === roleId);
+  } catch { return undefined; }
+}
 
 async function legacyHashPin(pin: string): Promise<string> {
   const bytes = new TextEncoder().encode(pin);
@@ -51,7 +85,7 @@ async function verifyPin(pin: string, encoded: string): Promise<boolean> {
 function readCachedUser(): PublicUser | null {
   try {
     const saved = localStorage.getItem(SESSION_USER_KEY);
-    return saved ? JSON.parse(saved) as PublicUser : null;
+  return saved ? normalizeLocalUser(JSON.parse(saved) as PublicUser) : null;
   } catch {
     return null;
   }
@@ -65,10 +99,10 @@ async function readLocalUsers(): Promise<LocalUser[]> {
       return saved ? JSON.parse(saved) as LocalUser[] : [];
     } catch { return []; }
   }
-  const rows = await db.select<Array<{ id: string; name: string; role: UserRole; pin_hash: string; created_at: string; is_active: number }>>(
-    "SELECT id, name, role, pin_hash, created_at, is_active FROM users ORDER BY created_at",
+  const rows = await db.select<Array<{ id: string; name: string; role: UserRole; role_id: string | null; role_name: string | null; menu_keys_json: string | null; pin_hash: string; created_at: string; is_active: number }>>(
+    "SELECT id, name, role, role_id, role_name, menu_keys_json, pin_hash, created_at, is_active FROM users ORDER BY created_at",
   );
-  return rows.map((row) => ({ id: row.id, name: row.name, role: row.role, pinHash: row.pin_hash, createdAt: row.created_at, isActive: row.is_active === 1 }));
+  return rows.map((row) => normalizeLocalUser({ id: row.id, name: row.name, role: row.role, roleId: row.role_id ?? undefined, roleName: row.role_name ?? undefined, menuKeys: row.menu_keys_json ? JSON.parse(row.menu_keys_json) as string[] : undefined, pinHash: row.pin_hash, createdAt: row.created_at, isActive: row.is_active === 1 }));
 }
 
 async function writeLocalUsers(users: LocalUser[]): Promise<void> {
@@ -80,8 +114,8 @@ async function writeLocalUsers(users: LocalUser[]): Promise<void> {
   for (const user of users) {
     if (!user.pinHash) continue;
     await db.execute(
-      "INSERT INTO users (id, name, role, pin_hash, created_at, is_active) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role, pin_hash = excluded.pin_hash, is_active = excluded.is_active",
-      [user.id, user.name, user.role, user.pinHash, user.createdAt, user.isActive === false ? 0 : 1],
+      "INSERT INTO users (id, name, role, role_id, role_name, menu_keys_json, pin_hash, created_at, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT(id) DO UPDATE SET name = excluded.name, role = excluded.role, role_id = excluded.role_id, role_name = excluded.role_name, menu_keys_json = excluded.menu_keys_json, pin_hash = excluded.pin_hash, is_active = excluded.is_active",
+      [user.id, user.name, user.role, user.roleId, user.roleName, JSON.stringify(user.menuKeys ?? []), user.pinHash, user.createdAt, user.isActive === false ? 0 : 1],
     );
   }
   const existing = await db.select<Array<{ id: string }>>("SELECT id FROM users");
@@ -100,12 +134,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsers(result.data);
   }, []);
 
+  const refreshCurrentUser = useCallback(async () => {
+    const result = await apiRequest<{ user: PublicUser }>("/v1/auth/me");
+    setSessionUser(result.user);
+    localStorage.setItem(SESSION_USER_KEY, JSON.stringify(result.user));
+  }, []);
+
   useEffect(() => {
     let active = true;
     void (async () => {
       let stored = await readLocalUsers();
       if (!stored.length) {
-        stored = [{ id: crypto.randomUUID(), name: "Admin", role: "admin", pinHash: await hashPin("898851"), createdAt: new Date().toISOString(), isActive: true }];
+        stored = [normalizeLocalUser({ id: crypto.randomUUID(), name: "Admin", role: "admin", pinHash: await hashPin("898851"), createdAt: new Date().toISOString(), isActive: true })];
       }
       if (!active) return;
       await writeLocalUsers(stored);
@@ -143,6 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     users,
     user: sessionUser ?? users.find((item) => item.id === activeId) ?? null,
     ready,
+    refreshCurrentUser,
     login: async (pin) => {
       try {
         const result = await apiRequest<SessionResponse>("/v1/auth/login", {
@@ -177,16 +218,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSessionUser(null);
       setActiveId(null);
     },
-    addUser: async (name, role, pin) => {
+    addUser: async (name, roleId, pin) => {
       if (localStorage.getItem(TOKEN_KEY)) {
         const result = await apiRequest<{ data: PublicUser }>("/v1/auth/users", {
           method: "POST",
-          body: JSON.stringify({ name, role, pin }),
+          body: JSON.stringify({ name, roleId, pin }),
         });
         setUsers((current) => [...current.filter((item) => item.id !== result.data.id), result.data]);
         return;
       }
-      await persistLocal([...users, { id: crypto.randomUUID(), name: name.trim(), role, pinHash: await hashPin(pin), createdAt: new Date().toISOString(), isActive: true }]);
+      const assigned = cachedRole(roleId);
+      if (!assigned) throw new Error("Peran belum tersimpan di perangkat. Hubungkan internet untuk menambah user.");
+      await persistLocal([...users, normalizeLocalUser({ id: crypto.randomUUID(), name: name.trim(), role: assigned.accessLevel, roleId, roleName: assigned.name, menuKeys: assigned.menuKeys, pinHash: await hashPin(pin), createdAt: new Date().toISOString(), isActive: true })]);
     },
     updateUser: async (id, patch) => {
       if (localStorage.getItem(TOKEN_KEY)) {
@@ -204,7 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const next = await Promise.all(users.map(async (item) => item.id !== id ? item : {
         ...item,
         ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
-        ...(patch.role ? { role: patch.role } : {}),
+        ...(patch.roleId ? { roleId: patch.roleId, ...(cachedRole(patch.roleId) ? { role: cachedRole(patch.roleId)!.accessLevel, roleName: cachedRole(patch.roleId)!.name, menuKeys: cachedRole(patch.roleId)!.menuKeys } : {}) } : {}),
         ...(patch.pin ? { pinHash: await hashPin(patch.pin) } : {}),
       }));
       await persistLocal(next);
@@ -215,7 +258,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       await persistLocal(users.filter((item) => item.id !== id));
     },
-  }), [users, activeId, sessionUser, ready, refreshRemoteUsers, persistLocal]);
+  }), [users, activeId, sessionUser, ready, refreshRemoteUsers, refreshCurrentUser, persistLocal]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

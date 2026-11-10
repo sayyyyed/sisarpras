@@ -52,7 +52,9 @@ export async function apiRequest<T>(path: string, init?: RequestInit, options: {
   if (!response.ok) {
     const message =
       body && typeof body === "object" && "error" in body
-        ? String((body as { error: unknown }).error)
+        ? String((body as { error: unknown; detail?: unknown }).error === "write_failed" && "detail" in body
+          ? (body as { detail: unknown }).detail
+          : (body as { error: unknown }).error)
         : `HTTP ${response.status}`;
     throw new ApiError(response.status, message, body);
   }
