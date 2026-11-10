@@ -18,3 +18,5 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 # Required by the code tauri::generate_context!() expands to.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+kamadak-exif = "0.6"
