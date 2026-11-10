@@ -84,7 +84,7 @@ export default function StockPage() {
       <Panel>
         {stockItems.length === 0 ? (
           <div className="px-5 py-10 text-center text-body-regular text-text-tertiary">
-            Belum ada jenis stok. Tambahkan lewat seed atau halaman pengadaan.
+            Belum ada jenis stok habis pakai.
           </div>
         ) : (
           <Table aria-label="Daftar stok" size="md">

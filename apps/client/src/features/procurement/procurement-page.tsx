@@ -17,7 +17,6 @@ import {
 } from "@/components/base/table/table";
 import { Textarea } from "@/components/base/textarea/textarea";
 import { MonoCode, PageHeading, Panel } from "@/components/ui/primitives";
-import { procurements } from "@/data/mock";
 import { formatDate, formatIdr } from "@/lib/format";
 import { useApp } from "@/lib/store";
 
@@ -70,6 +69,9 @@ function NewRequestForm() {
 }
 
 export default function ProcurementPage() {
+  const { procurements: rawProcurements } = useApp();
+  // The server does not store receipt bytes yet, so normalise the shape here.
+  const procurements = rawProcurements.map((item) => ({ ...item, receiptFiles: item.receiptFiles ?? [] }));
   const awaiting = procurements.filter((item) => item.status === "submitted");
   const approved = procurements.filter((item) => item.status === "approved" || item.status === "received");
   const awaitingValue = awaiting.reduce((sum, item) => sum + item.proposedPriceIdr, 0);

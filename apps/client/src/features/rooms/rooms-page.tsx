@@ -1,9 +1,11 @@
-import { useState } from "react";
-import { RiAddLine, RiStackLine } from "@remixicon/react";
-import { LOCATION_KIND_LABEL, ROOM_HEALTH_LABEL, LocationDraftSchema, type LocationKind } from "@sisarpras/domain";
+import { useMemo, useState } from "react";
+import { RiAddLine, RiArrowRightSLine, RiBuilding2Line, RiEditLine, RiStackLine } from "@remixicon/react";
+import { useNavigate } from "react-router-dom";
+import { ROOM_HEALTH_LABEL, type Location } from "@sisarpras/domain";
 import { Avatar } from "@/components/base/avatar/avatar";
 import { Chip, type ChipColor } from "@/components/base/badges/chip";
 import { Button } from "@/components/base/buttons/button";
+import { Divider } from "@/components/base/divider/divider";
 import { Input } from "@/components/base/input/input";
 import { Meter, type MeterTone } from "@/components/base/meter/meter";
 import {
@@ -17,132 +19,153 @@ import {
 } from "@/components/base/modal/modal";
 import { NumberField } from "@/components/base/number-field/number-field";
 import { Select, SelectItem } from "@/components/base/select/select";
-import { PageHeading, Panel } from "@/components/ui/primitives";
-import { stockItems } from "@/data/mock";
+import { PageHeading, Panel, SectionHeading } from "@/components/ui/primitives";
+import { formatNumber } from "@/lib/format";
 import { percent, summarizeRooms } from "@/lib/inventory";
 import { useApp } from "@/lib/store";
-import type { LocationDraft } from "@sisarpras/domain";
 
-const HEALTH_CHIP: Record<string, ChipColor> = {
-  good: "lime",
-  attention: "yellow",
-  critical: "rose",
-  storage: "cyan",
-};
-
-const HEALTH_TONE: Record<string, MeterTone> = {
-  good: "success",
-  attention: "warning",
-  critical: "error",
-  storage: "accent",
-};
+const HEALTH_CHIP: Record<string, ChipColor> = { good: "lime", attention: "yellow", critical: "rose", storage: "cyan" };
+const HEALTH_TONE: Record<string, MeterTone> = { good: "success", attention: "warning", critical: "error", storage: "accent" };
 
 export default function RoomsPage() {
-  const { assets, locations } = useApp();
-  const rooms = summarizeRooms(locations, assets);
-  const totalStock = stockItems.reduce((sum, item) => sum + item.quantity, 0);
+  const { assets, locations, stockItems } = useApp();
+  const buildings = useMemo(() => locations.filter((item) => item.kind === "building"), [locations]);
+  const floors = useMemo(() => locations.filter((item) => item.kind === "floor"), [locations]);
+  const rooms = useMemo(() => locations.filter((item) => item.kind === "room" || item.kind === "storage"), [locations]);
+  const summaries = useMemo(() => summarizeRooms(locations, assets), [locations, assets]);
+  const navigate = useNavigate();
+
+
+  // The empty state is the entry point: no building means no rooms yet.
+  if (buildings.length === 0) {
+    return (
+      <>
+        <PageHeading
+          title="Ruangan"
+          subtitle="Mulai dengan menambahkan gedung. Ruangan hanya bisa dibuat setelah gedung ada."
+        />
+        <Panel padded className="mx-auto max-w-[560px]">
+          <SectionHeading title="Tambah Gedung Pertama" subtitle="Nama gedung dan jumlah lantainya." />
+          <div className="mt-5">
+            <BuildingForm />
+          </div>
+        </Panel>
+      </>
+    );
+  }
 
   return (
     <>
       <PageHeading
         title="Ruangan"
-        subtitle="Klasifikasi status tiap ruangan dihitung dari kondisi aset di dalamnya"
+        subtitle={`${buildings.length} gedung · ${rooms.length} ruangan · ${flatsLabel(floors.length)}`}
         actions={
           <ModalTrigger>
-            <Button leadingIcon={RiAddLine}>Tambah Ruangan</Button>
-            <Modal size="md" aria-label="Tambah ruangan">
-              <ModalDialog aria-label="Tambah ruangan">
-                <ModalHeader
-                  title="Tambah Ruangan"
-                  description="Gedung, lantai, ruangan, atau gudang. Tersimpan ke PostgreSQL."
-                />
-                <NewRoomForm />
+            <Button variant="secondary" leadingIcon={RiBuilding2Line}>
+              Tambah Gedung
+            </Button>
+            <Modal size="md" aria-label="Tambah gedung">
+              <ModalDialog aria-label="Tambah gedung">
+                <ModalHeader title="Tambah Gedung" description="Lantai dibuat otomatis sesuai jumlah yang diisi." />
+                <BuildingForm />
               </ModalDialog>
             </Modal>
           </ModalTrigger>
         }
       />
 
-      <Panel padded>
-        <div className="flex flex-wrap items-end gap-3">
-          <Select aria-label="Filter gedung" className="w-[200px]" defaultSelectedKey="all">
-            <SelectItem id="all">Semua gedung</SelectItem>
-            <SelectItem id="a">Gedung A</SelectItem>
-            <SelectItem id="b">Gedung B</SelectItem>
-          </Select>
-          <Select aria-label="Filter lantai" className="w-[180px]" defaultSelectedKey="all">
-            <SelectItem id="all">Semua lantai</SelectItem>
-            <SelectItem id="1">Lantai 1</SelectItem>
-            <SelectItem id="2">Lantai 2</SelectItem>
-            <SelectItem id="3">Lantai 3</SelectItem>
-          </Select>
-        </div>
-      </Panel>
-
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {rooms.map((room) => {
-          const isStorage = room.health === "storage";
-          const healthy = isStorage
-            ? percent(
-                stockItems.filter((item) => item.quantity >= item.reorderLevel).length,
-                stockItems.length,
-              )
-            : percent(room.byCondition.good, room.totalAssets);
+      <div className="flex flex-col gap-6">
+        {buildings.map((building) => {
+          const buildingFloors = floors.filter((floor) => floor.parentId === building.id);
+          const buildingRooms = rooms.filter((room) => room.parentId === building.id || room.building === building.name);
+          const buildingSummary = summaries.filter((summary) => buildingRooms.some((room) => room.id === summary.location.id));
+          const totalAssets = buildingSummary.reduce((sum, item) => sum + item.totalAssets, 0);
 
           return (
-            <Panel key={room.location.id} padded className="flex flex-col gap-4">
-              <div className="flex items-start gap-3">
-                <Avatar
-                  size="md"
-                  color={isStorage ? "blue" : "neutral"}
-                  initials={room.location.name.slice(0, 2).toUpperCase()}
-                />
+            <Panel key={building.id} padded>
+              <div className="flex flex-wrap items-center gap-3">
+                <Avatar size="md" color="blue" initials={building.name.slice(0, 2).toUpperCase()} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-title-3-semibold text-text-primary">{room.location.name}</div>
+                  <div className="truncate text-title-3-semibold text-text-primary">{building.name}</div>
                   <div className="text-caption-1-regular text-text-tertiary">
-                    {room.location.building} · {room.location.floor}
-                    {room.location.capacity ? ` · Kapasitas ${room.location.capacity}` : ""}
+                    {buildingFloors.length} lantai · {buildingRooms.length} ruangan ·{" "}
+                    {formatNumber(totalAssets)} aset
                   </div>
                 </div>
-                <Chip variant="bold" color={HEALTH_CHIP[room.health] ?? "neutral"}>
-                  {ROOM_HEALTH_LABEL[room.health]}
-                </Chip>
+                <ModalTrigger>
+                  <Button size="small" variant="secondary" leadingIcon={RiEditLine}>
+                    Edit Gedung
+                  </Button>
+                  <Modal size="md" aria-label="Edit gedung">
+                    <ModalDialog aria-label="Edit gedung">
+                      <ModalHeader title="Edit Gedung" description="Nama gedung akan diperbarui pada lantai dan ruangan terkait." />
+                      <EditBuildingForm building={building} floors={buildingFloors} />
+                    </ModalDialog>
+                  </Modal>
+                </ModalTrigger>
+                <ModalTrigger>
+                  <Button size="small" leadingIcon={RiAddLine}>
+                    Tambah Ruangan
+                  </Button>
+                  <Modal size="md" aria-label="Tambah ruangan">
+                    <ModalDialog aria-label="Tambah ruangan">
+                      <ModalHeader title={`Tambah Ruangan — ${building.name}`} description="Pilih lantai dari gedung ini." />
+                      <RoomForm building={building} floors={buildingFloors} />
+                    </ModalDialog>
+                  </Modal>
+                </ModalTrigger>
               </div>
 
-              <Meter
-                label={
-                  isStorage
-                    ? `${stockItems.length} jenis stok · ${totalStock} unit tersedia`
-                    : `${room.totalAssets} aset di ruangan ini`
-                }
-                showValueLabel
-                tone={HEALTH_TONE[room.health] ?? "accent"}
-                value={healthy}
-              />
+              <Divider className="my-4" />
 
-              {isStorage ? (
-                <div className="flex flex-wrap gap-2">
-                  {stockItems.map((item) => (
-                    <Chip
-                      key={item.id}
-                      variant="caption"
-                      color={item.quantity < item.reorderLevel ? "yellow" : "lime"}
-                    >
-                      {item.name} · {item.quantity} {item.unit}
-                    </Chip>
-                  ))}
+              {buildingRooms.length === 0 ? (
+                <div className="py-8 text-center text-body-regular text-text-tertiary">
+                  Belum ada ruangan di gedung ini.
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  <Chip variant="bold" color="lime">
-                    Baik {room.byCondition.good}
-                  </Chip>
-                  <Chip variant="bold" color="yellow">
-                    Cukup {room.byCondition.fair}
-                  </Chip>
-                  <Chip variant="bold" color="rose">
-                    Rusak {room.byCondition.damaged}
-                  </Chip>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {buildingRooms.map((room) => {
+                    const summary = summaries.find((item) => item.location.id === room.id);
+                    const total = summary?.totalAssets ?? 0;
+                    const isStorage = room.kind === "storage";
+                    return (
+                      <button
+                        key={room.id}
+                        type="button"
+                        onClick={() => navigate(`/rooms/${room.id}`)}
+                        className={`flex flex-col gap-3 rounded-2xl border border-border-button-default bg-background-primary-default p-4 text-left transition-colors hover:bg-background-secondary-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 ${room.active === false ? "opacity-55" : ""}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-title-3-semibold text-text-primary">{room.name}</div>
+                            <div className="text-caption-1-regular text-text-tertiary">
+                              {room.floor ?? "Lantai belum diset"}
+                              {room.capacity ? ` · Kapasitas ${room.capacity}` : ""}
+                            </div>
+                          </div>
+                          <Chip variant="bold" color={HEALTH_CHIP[summary?.health ?? "good"]}>
+                            {ROOM_HEALTH_LABEL[summary?.health ?? "good"]}
+                          </Chip>
+                        </div>
+
+                        <Meter
+                          aria-label={`Kondisi aset ${room.name}`}
+                          value={isStorage ? 100 : percent(summary?.byCondition.good ?? 0, total || 1)}
+                          tone={HEALTH_TONE[summary?.health ?? "good"]}
+                          size="sm"
+                        />
+
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-caption-1-regular text-text-tertiary">
+                            {isStorage ? "Gudang penyimpanan" : `${total} aset`}
+                          </span>
+                          <span className="flex items-center gap-1 text-caption-1-semibold text-accent-600">
+                            {room.active === false ? "Nonaktif · Detail" : "Detail"} <RiArrowRightSLine className="size-3.5" />
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </Panel>
@@ -153,56 +176,84 @@ export default function RoomsPage() {
       <Panel padded>
         <div className="flex items-center gap-2 text-body-medium text-text-secondary">
           <RiStackLine className="size-4" />
-          Ruangan ber-kondisi kritis (kerusakan ≥ 15%) perlu ditinjau lebih dulu sebelum pengadaan baru.
+          {formatNumber(stockItems.length)} jenis stok habis pakai dikelola di halaman Stok, terpisah dari ruangan.
         </div>
       </Panel>
     </>
   );
 }
 
-function NewRoomForm() {
+function EditBuildingForm({ building, floors }: { building: Location; floors: Location[] }) {
   const close = useModalClose();
-  const { createLocation, locations, showToast } = useApp();
+  const { updateBuilding, showToast } = useApp();
+  const [name, setName] = useState(building.name);
+  const [floorCount, setFloorCount] = useState<number | undefined>(floors.length);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
+  async function save() {
+    const trimmed = name.trim();
+    if (!trimmed) return setError("Nama gedung wajib diisi.");
+    if (!floorCount || floorCount < 1) return setError("Jumlah lantai minimal 1.");
+    setSaving(true);
+    try {
+      const result = await updateBuilding(building.id, { name: trimmed, floorCount });
+      if (!result.ok) return setError(result.error === "floor_has_rooms"
+        ? "Lantai yang dikurangi masih memiliki ruangan. Pindahkan ruangan terlebih dahulu."
+        : result.error ?? "Gagal memperbarui gedung.");
+      showToast("Gedung diperbarui", `${trimmed} · ${floorCount} lantai`);
+      close();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <>
+    <ModalBody>
+      <div className="flex flex-col gap-3">
+        <Input label="Nama gedung *" value={name} onChange={setName} />
+        <NumberField
+          label="Jumlah lantai *"
+          minValue={1}
+          maxValue={50}
+          value={floorCount}
+          onChange={(value) => setFloorCount(Number.isNaN(value) ? undefined : value)}
+          hint="Lantai paling atas dihapus jika jumlah dikurangi."
+        />
+        {error && <p className="text-caption-1-regular text-text-error-primary">{error}</p>}
+      </div>
+    </ModalBody>
+    <ModalFooter>
+      <Button variant="secondary" onClick={close} disabled={saving}>Batal</Button>
+      <Button onClick={save} disabled={saving}>{saving ? "Menyimpan…" : "Simpan"}</Button>
+    </ModalFooter>
+  </>;
+}
+
+function flatsLabel(count: number): string {
+  return `${count} lantai`;
+}
+
+function BuildingForm() {
+  const close = useModalClose();
+  const { createBuilding, showToast } = useApp();
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<LocationKind>("room");
-  const [buildingId, setBuildingId] = useState<string | null>(null);
-  const [floor, setFloor] = useState("");
-  const [capacity, setCapacity] = useState<number | undefined>(undefined);
+  const [floorCount, setFloorCount] = useState<number | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const buildings = locations.filter((item) => item.kind === "building");
-
   async function save() {
-    const parent = buildings.find((item) => item.id === buildingId) ?? null;
-
-    const parsed = LocationDraftSchema.safeParse({
-      name: name.trim(),
-      kind,
-      // A building is its own root; children point at the selected building.
-      parentId: kind === "building" ? null : (parent?.id ?? null),
-      building: kind === "building" ? name.trim() || null : (parent?.name ?? null),
-      floor: floor.trim() || null,
-      capacity: capacity ?? null,
-    } satisfies LocationDraft);
-
-    if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "Data belum lengkap");
-      return;
-    }
+    const trimmed = name.trim();
+    const total = floorCount ?? 0;
+    if (!trimmed) return setError("Nama gedung wajib diisi");
+    if (total < 1) return setError("Jumlah lantai minimal 1");
 
     setSaving(true);
     try {
-      const outcome = await createLocation(parsed.data);
-      if (!outcome.ok) {
-        setError(outcome.error ?? "Gagal menyimpan ruangan");
-        return;
-      }
-      showToast(
-        outcome.queued ? "Tersimpan di perangkat" : "Ruangan ditambahkan",
-        outcome.queued ? "Server belum terjangkau — akan disinkronkan nanti" : parsed.data.name,
-      );
+      const outcome = await createBuilding({ name: trimmed, floorCount: total });
+      if (!outcome.ok) return setError(outcome.error ?? "Gagal menyimpan gedung");
+
+      showToast("Gedung ditambahkan", `${trimmed} · ${total} lantai`);
       close();
     } finally {
       setSaving(false);
@@ -213,34 +264,82 @@ function NewRoomForm() {
     <>
       <ModalBody>
         <div className="flex flex-col gap-5">
-          <Input
-            label="Nama *"
-            placeholder="cth. Ruang 401 - Rapat"
-            value={name}
-            onChange={setName}
-            isInvalid={Boolean(error)}
+          <Input label="Nama gedung *" placeholder="cth. Gedung A" value={name} onChange={setName} />
+          <NumberField
+            label="Jumlah lantai *"
+            minValue={1}
+            maxValue={50}
+            value={floorCount}
+            onChange={(value) => setFloorCount(Number.isNaN(value) ? undefined : value)}
+            hint="Lantai (Lantai 1, Lantai 2, …) dibuat otomatis."
           />
+          {error && <p className="text-caption-1-regular text-text-error-primary">{error}</p>}
+        </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="secondary" onClick={close} disabled={saving}>
+          Batal
+        </Button>
+        <Button onClick={save} disabled={saving}>
+          {saving ? "Menyimpan..." : "Simpan Gedung"}
+        </Button>
+      </ModalFooter>
+    </>
+  );
+}
 
-          <Select
-            label="Jenis"
-            selectedKey={kind}
-            onSelectionChange={(key) => setKind(String(key) as LocationKind)}
-          >
-            {(Object.keys(LOCATION_KIND_LABEL) as LocationKind[]).map((value) => (
-              <SelectItem key={value} id={value}>
-                {LOCATION_KIND_LABEL[value]}
-              </SelectItem>
-            ))}
-          </Select>
+function RoomForm({ building, floors }: { building: Location; floors: Location[] }) {
+  const close = useModalClose();
+  const { createLocation, showToast } = useApp();
+  const [name, setName] = useState("");
+  const [floorId, setFloorId] = useState<string | null>(null);
+  const [capacity, setCapacity] = useState<number | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-          {kind !== "building" && (
+  const floor = floors.find((item) => item.id === floorId) ?? null;
+
+  async function save() {
+    if (!name.trim()) return setError("Nama ruangan wajib diisi");
+    if (!floor) return setError("Pilih lantai dulu");
+
+    setSaving(true);
+    try {
+      const outcome = await createLocation({
+        name: name.trim(),
+        kind: "room",
+        parentId: floor.id,
+        building: building.name,
+        floor: floor.name,
+        capacity: capacity ?? null,
+      });
+      if (!outcome.ok) return setError(outcome.error ?? "Gagal menyimpan ruangan");
+      showToast("Ruangan ditambahkan", `${name.trim()} · ${building.name} ${floor.name}`);
+      close();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <ModalBody>
+        <div className="flex flex-col gap-5">
+          <Input label="Nama ruangan *" placeholder="cth. Ruang 201 - Rapat" value={name} onChange={setName} />
+
+          {floors.length === 0 ? (
+            <p className="rounded-xl bg-background-tertiary-default p-3 text-caption-1-regular text-text-tertiary">
+              Gedung ini belum punya data lantai. Buat ulang gedung lewat "Tambah Gedung" dengan jumlah lantai, agar
+              lantainya tersimpan.
+            </p>
+          ) : (
             <Select
-              label="Gedung induk"
-              placeholder="Pilih gedung..."
-              selectedKey={buildingId}
-              onSelectionChange={(key) => setBuildingId(key === null ? null : String(key))}
+              label="Lantai *"
+              placeholder="Pilih lantai..."
+              selectedKey={floorId}
+              onSelectionChange={(key) => setFloorId(key === null ? null : String(key))}
             >
-              {buildings.map((item) => (
+              {floors.map((item) => (
                 <SelectItem key={item.id} id={item.id}>
                   {item.name}
                 </SelectItem>
@@ -248,25 +347,21 @@ function NewRoomForm() {
             </Select>
           )}
 
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Input label="Lantai" placeholder="cth. Lantai 4" value={floor} onChange={setFloor} />
-            <NumberField
-              label="Kapasitas"
-              minValue={0}
-              value={capacity}
-              onChange={(value) => setCapacity(Number.isNaN(value) ? undefined : value)}
-            />
-          </div>
+          <NumberField
+            label="Kapasitas"
+            minValue={0}
+            value={capacity}
+            onChange={(value) => setCapacity(Number.isNaN(value) ? undefined : value)}
+          />
 
           {error && <p className="text-caption-1-regular text-text-error-primary">{error}</p>}
         </div>
       </ModalBody>
-
       <ModalFooter>
         <Button variant="secondary" onClick={close} disabled={saving}>
           Batal
         </Button>
-        <Button onClick={save} disabled={saving}>
+        <Button onClick={save} disabled={saving || floors.length === 0}>
           {saving ? "Menyimpan..." : "Simpan Ruangan"}
         </Button>
       </ModalFooter>

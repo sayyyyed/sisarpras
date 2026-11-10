@@ -11,6 +11,7 @@ import { PageHeading, Panel, SectionHeading } from "@/components/ui/primitives";
 import { formatDate } from "@/lib/format";
 import { activeAssets } from "@/lib/inventory";
 import { useApp } from "@/lib/store";
+import { useCompanyProfile } from "@/lib/company";
 
 /** Deterministic decorative QR block — a real encoder ships with the QR feature. */
 function PreviewCode({ seed }: { seed: string }) {
@@ -71,23 +72,27 @@ function PreviewCode({ seed }: { seed: string }) {
 }
 
 export default function LabelsPage() {
-  const { assets, categories, locations, showToast } = useApp();
+  const { assets, categories, locations } = useApp();
+  const company = useCompanyProfile();
   const list = activeAssets(assets);
   const categoryName = useMemo(() => new Map(categories.map((item) => [item.id, item.name])), [categories]);
   const locationName = useMemo(() => new Map(locations.map((item) => [item.id, item.name])), [locations]);
 
   const [selectedId, setSelectedId] = useState(() => list[0]?.id ?? "");
-  const [prefix, setPrefix] = useState("AST-2026-");
+  const [prefix, setPrefix] = useState("");
   const [codeKind, setCodeKind] = useState<string | null>("qr");
-  const [logoLabel, setLogoLabel] = useState("SP");
+  const [logoLabel, setLogoLabel] = useState("");
 
   const selected = list.find((asset) => asset.id === selectedId) ?? list[0];
+  const selectedPrefix = selected ? `${selected.assetCode.split("-").slice(0, -1).join("-")}-` : "";
+  const effectivePrefix = prefix || selectedPrefix;
+  const effectiveLogoLabel = logoLabel || company.name.slice(0, 2).toUpperCase();
 
   const previewCode = useMemo(() => {
-    if (!selected) return `${prefix}____`;
+    if (!selected) return "";
     const suffix = selected.assetCode.split("-").slice(-1)[0];
-    return `${prefix}${suffix}`;
-  }, [prefix, selected]);
+    return `${effectivePrefix}${suffix}`;
+  }, [effectivePrefix, selected]);
 
   return (
     <>
@@ -96,12 +101,12 @@ export default function LabelsPage() {
         subtitle="Stiker inventaris dengan logo dan kode kustom — siap cetak, juga saat offline"
       />
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <Panel padded>
           <SectionHeading title="Pengaturan Stiker" subtitle="Berlaku untuk semua label di batch ini" />
 
           <div className="mt-5 grid gap-5 sm:grid-cols-2">
-            <Input label="Prefix kode" value={prefix} onChange={setPrefix} hint="Nomor mengikuti aset terpilih" />
+            <Input label="Prefix kode" value={effectivePrefix} onChange={setPrefix} hint="Nomor mengikuti aset terpilih" />
             <Select
               label="Jenis kode"
               selectedKey={codeKind}
@@ -116,7 +121,7 @@ export default function LabelsPage() {
               <SelectItem id="100x50">100 × 50 mm</SelectItem>
             </Select>
             <NumberField label="Jumlah salinan" defaultValue={1} minValue={1} maxValue={50} />
-            <Input label="Teks logo" value={logoLabel} onChange={(value) => setLogoLabel(value.toUpperCase())} hint="Upload gambar menyusul; dipakai inisial" maxLength={3} />
+            <Input label="Teks logo" value={effectiveLogoLabel} onChange={(value) => setLogoLabel(value.toUpperCase())} maxLength={3} />
             <Input label="Penanggung jawab (opsional)" placeholder="cth. Bagian Umum" />
           </div>
 
@@ -130,9 +135,9 @@ export default function LabelsPage() {
           <Divider className="my-6" />
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary">Pratinjau lembar A4</Button>
-            <Button leadingIcon={RiPrinterLine} onClick={() => showToast("Stiker dikirim ke antrean cetak", previewCode)}>
-              Cetak Stiker
+            <Button variant="secondary" disabled>Pratinjau lembar A4 (belum tersedia)</Button>
+            <Button leadingIcon={RiPrinterLine} disabled>
+              Cetak Stiker (belum tersedia)
             </Button>
           </div>
         </Panel>
@@ -148,12 +153,12 @@ export default function LabelsPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="grid size-[22px] place-items-center rounded-md bg-accent-600 text-[9px] font-bold text-white">
-                    {logoLabel || "SP"}
+                    {effectiveLogoLabel}
                   </div>
                   <div className="mt-1.5 truncate text-[15px] font-bold tracking-tight">{selected.name}</div>
                   <div className="mt-1 font-mono text-[17px] font-bold tracking-wide">{previewCode}</div>
                   <div className="mt-1 text-[10.5px] leading-relaxed text-[#475467]">
-                    {locationName.get(selected.locationId) ?? "—"} · {categoryName.get(selected.categoryId) ?? "—"}
+                    {locationName.get(selected.locationId ?? "") ?? "—"} · {categoryName.get(selected.categoryId) ?? "—"}
                     <br />
                     Kondisi: {CONDITION_LABEL[selected.condition]} · Perolehan: {formatDate(selected.acquisitionDate)}
                   </div>
@@ -182,11 +187,11 @@ export default function LabelsPage() {
                   <Button
                     key={asset.id}
                     variant={isSelected ? "secondary" : "ghost"}
-                    className="justify-between"
+                    className="justify-between gap-3"
                     onClick={() => setSelectedId(asset.id)}
                   >
                     <span className="truncate">{asset.name}</span>
-                    <span className="font-mono text-caption-1-regular text-text-tertiary">{asset.assetCode}</span>
+                    <span className="shrink-0 font-mono text-caption-1-regular text-text-tertiary">{asset.assetCode}</span>
                   </Button>
                 );
               })}

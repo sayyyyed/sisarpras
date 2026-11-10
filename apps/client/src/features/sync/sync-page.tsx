@@ -2,8 +2,6 @@ import { RiAlertLine, RiCloudOffLine, RiRefreshLine, RiWifiLine } from "@remixic
 import { StatCards, type Stat } from "@/components/application/dashboard/stat-cards";
 import { Chip, type ChipColor } from "@/components/base/badges/chip";
 import { Button } from "@/components/base/buttons/button";
-import { Divider } from "@/components/base/divider/divider";
-import { AlertDialog, ModalTrigger } from "@/components/base/modal/modal";
 import {
   Table,
   TableBody,
@@ -35,7 +33,7 @@ export default function SyncPage() {
       icon: online ? RiWifiLine : RiCloudOffLine,
       label: "Koneksi",
       value: online ? "Terhubung" : "Terputus",
-      delta: online ? "siap mengirim" : "terakhir 09:02",
+      delta: online ? "siap mengirim" : "tidak ada koneksi",
       deltaColor: online ? "lime" : "neutral",
       tone: online ? "emerald" : "orange",
       caption: "Status sambungan ke server pusat",
@@ -145,47 +143,24 @@ export default function SyncPage() {
         </Panel>
 
         <Panel padded>
-          <SectionHeading
-            title="Konflik Terdeteksi"
-            subtitle="Aset ini diubah di perangkat lain saat perangkat ini offline"
-          />
-
-          <div className="mt-4 flex flex-col gap-2 rounded-2xl border border-border-button-default p-4">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-body-medium text-text-primary">AC Split Daikin 1.5PK</span>
-              <MonoCode>AST-2026-0042</MonoCode>
+          <SectionHeading title="Konflik Terdeteksi" subtitle={`${conflicts.length} perubahan perlu ditinjau`} />
+          {conflicts.length === 0 ? (
+            <p className="mt-4 rounded-xl border border-dashed border-border-button-default p-5 text-center text-body-regular text-text-tertiary">
+              Tidak ada konflik sinkronisasi.
+            </p>
+          ) : (
+            <div className="mt-4 flex flex-col gap-2">
+              {conflicts.map((item) => (
+                <div key={item.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border-button-default p-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-body-medium text-text-primary">{item.entityLabel}</div>
+                    <div className="text-caption-1-regular text-text-tertiary">{item.lastError ?? "Perlu ditinjau sebelum dikirim ulang."}</div>
+                  </div>
+                  <Chip variant="bold" color={STATUS_CHIP[item.status]}>{item.status}</Chip>
+                </div>
+              ))}
             </div>
-            <Divider className="my-1" />
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-caption-1-regular text-text-tertiary">Nilai server (Ruang 305)</span>
-              <Chip variant="bold" color="rose">
-                Rusak
-              </Chip>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-caption-1-regular text-text-tertiary">Usulan Anda (Ruang 104)</span>
-              <Chip variant="bold" color="yellow">
-                Cukup
-              </Chip>
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-col gap-2">
-            <ModalTrigger>
-              <Button variant="secondary">Lihat perbandingan lengkap</Button>
-              <AlertDialog
-                title="Tinjau konflik aset"
-                description="Perubahan tidak digabung otomatis. Pilih salah satu nilai untuk melanjutkan."
-                confirmLabel="Terapkan perubahan saya"
-                cancelLabel="Pertahankan nilai server"
-                onConfirm={() => showToast("Perubahan Anda diterapkan", "Outbox akan dikirim ulang")}
-                onCancel={() => showToast("Nilai server dipertahankan")}
-              />
-            </ModalTrigger>
-            <Button variant="ghost" onClick={() => showToast("Nilai server dipertahankan")}>
-              Pertahankan nilai server
-            </Button>
-          </div>
+          )}
         </Panel>
       </div>
     </>
