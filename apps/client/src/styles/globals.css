@@ -104,6 +104,13 @@ body {
   color: var(--color-text-primary);
 }
 
+/* The authenticated shell owns its scroll area; focused form controls must not
+   scroll the document behind its fixed viewport frame. */
+html:has([data-app-main]),
+body:has([data-app-main]) {
+  overflow: hidden;
+}
+
 /* Theme-aware monochrome BoardUI mark. Both images keep their intrinsic
  * dimensions while the root theme class decides which one participates in
  * layout, avoiding a light-logo flash during hydration. */
