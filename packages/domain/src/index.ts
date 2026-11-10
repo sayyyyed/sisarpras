@@ -1,5 +1,25 @@
 import { z } from "zod";
 
+export const APP_MENU_DEFINITIONS = [
+  { key: "dashboard", label: "Dashboard", required: true },
+  { key: "assets", label: "Aset", required: false },
+  { key: "rooms", label: "Ruangan", required: false },
+  { key: "procurement", label: "Pengadaan", required: false },
+  { key: "labels", label: "Label & Barcode", required: false },
+  { key: "stock", label: "Stok", required: false },
+  { key: "loans", label: "Peminjaman", required: false },
+  { key: "sync", label: "Sinkronisasi", required: false },
+  { key: "reports", label: "Laporan", required: false },
+  { key: "settings", label: "Pengaturan", required: false },
+  { key: "users", label: "Manajemen User", required: true },
+] as const;
+export type AppMenuKey = (typeof APP_MENU_DEFINITIONS)[number]["key"];
+export const DEFAULT_ROLE_MENU_KEYS: Record<"admin" | "operator" | "viewer", AppMenuKey[]> = {
+  admin: APP_MENU_DEFINITIONS.map((menu) => menu.key),
+  operator: APP_MENU_DEFINITIONS.filter((menu) => menu.key !== "users").map((menu) => menu.key),
+  viewer: APP_MENU_DEFINITIONS.filter((menu) => menu.key !== "users").map((menu) => menu.key),
+};
+
 /* ---------------------------------------------------------------------------
    Assets
    --------------------------------------------------------------------------- */
@@ -15,7 +35,9 @@ export const AssetSchema = z.object({
   assetCode: z.string().min(1).max(100),
   name: z.string().min(1).max(255),
   categoryId: z.string().min(1),
-  locationId: z.string().min(1),
+  locationId: z.string().min(1).nullable().default(null),
+  stockQuantity: z.number().int().nonnegative().default(0),
+  roomStocks: z.array(z.object({ locationId: z.string().min(1), quantity: z.number().int().positive() })).default([]),
   serialNumber: z.string().max(150).nullable(),
   description: z.string().nullable(),
   condition: AssetCondition,
@@ -39,6 +61,25 @@ export const AssetDraftSchema = AssetSchema.omit({
 });
 export type AssetDraft = z.infer<typeof AssetDraftSchema>;
 
+/** Partial update for PATCH /v1/assets/:id. */
+export const AssetPatchSchema = AssetDraftSchema.omit({ stockQuantity: true, roomStocks: true }).partial();
+export type AssetPatch = z.infer<typeof AssetPatchSchema>;
+
+export const AssetStockAdjustmentSchema = z.object({ delta: z.number().int().refine((value) => value !== 0) });
+export type AssetStockAdjustment = z.infer<typeof AssetStockAdjustmentSchema>;
+
+export const AssetRoomStockSchema = z.object({ quantity: z.number().int().nonnegative() });
+export type AssetRoomStock = z.infer<typeof AssetRoomStockSchema>;
+
+export const AssetLoanSchema = z.object({
+  id: z.string().min(1), assetId: z.string().min(1), borrowerName: z.string().trim().min(1).max(255),
+  quantity: z.number().int().positive(), startDate: z.string().date(), dueDate: z.string().date(),
+  returnedAt: z.string().nullable(), createdAt: z.string(),
+});
+export type AssetLoan = z.infer<typeof AssetLoanSchema>;
+export const AssetLoanDraftSchema = AssetLoanSchema.omit({ id: true, returnedAt: true, createdAt: true }).refine((v) => v.dueDate >= v.startDate, { message: "Tanggal jatuh tempo harus setelah tanggal pinjam", path: ["dueDate"] });
+export type AssetLoanDraft = z.infer<typeof AssetLoanDraftSchema>;
+
 /* ---------------------------------------------------------------------------
    Categories & locations
    --------------------------------------------------------------------------- */
@@ -47,8 +88,15 @@ export const CategorySchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   code: z.string().min(1),
+  active: z.boolean().default(true),
 });
 export type Category = z.infer<typeof CategorySchema>;
+
+export const CategoryPatchSchema = z.object({
+  name: z.string().trim().min(1).max(255).optional(),
+  active: z.boolean().optional(),
+}).refine((value) => Object.keys(value).length > 0, { message: "empty_patch" });
+export type CategoryPatch = z.infer<typeof CategoryPatchSchema>;
 
 /** Rooms are hierarchical: building > floor > room, linked by parentId. */
 export const LocationKind = z.enum(["building", "floor", "room", "storage"]);
@@ -62,6 +110,7 @@ export const LocationSchema = z.object({
   building: z.string().nullable(),
   floor: z.string().nullable(),
   capacity: z.number().int().nonnegative().nullable(),
+  active: z.boolean().default(true),
 });
 export type Location = z.infer<typeof LocationSchema>;
 
@@ -73,8 +122,13 @@ export const LocationDraftSchema = z.object({
   building: z.string().max(255).nullable(),
   floor: z.string().max(100).nullable(),
   capacity: z.number().int().nonnegative().nullable(),
+  active: z.boolean().optional(),
 });
 export type LocationDraft = z.infer<typeof LocationDraftSchema>;
+
+/** Partial update for PATCH /v1/locations/:id. */
+export const LocationPatchSchema = LocationDraftSchema.partial();
+export type LocationPatch = z.infer<typeof LocationPatchSchema>;
 
 export const LOCATION_KIND_LABEL: Record<LocationKind, string> = {
   building: "Gedung",
@@ -125,6 +179,28 @@ export const ProcurementSchema = z.object({
   receiptFiles: z.array(z.string()),
 });
 export type Procurement = z.infer<typeof ProcurementSchema>;
+
+/** Payload for "Buat Pengajuan". Server assigns id, reference, status, timestamps. */
+export const ProcurementDraftSchema = z.object({
+  itemName: z.string().trim().min(1, "Nama barang wajib diisi").max(255),
+  quantity: z.number().int().positive(),
+  vendor: z.string().trim().max(255).nullable(),
+  proposedPriceIdr: z.number().int().nonnegative(),
+  requestedAt: z.string().min(1),
+  notes: z.string().max(1000).nullable(),
+});
+export type ProcurementDraft = z.infer<typeof ProcurementDraftSchema>;
+
+export const ProcurementPatchSchema = z.object({
+  itemName: z.string().trim().min(1).max(255).optional(),
+  quantity: z.number().int().positive().optional(),
+  vendor: z.string().trim().max(255).nullable().optional(),
+  proposedPriceIdr: z.number().int().nonnegative().optional(),
+  approvedPriceIdr: z.number().int().nonnegative().nullable().optional(),
+  status: ProcurementStatus.optional(),
+  notes: z.string().max(1000).nullable().optional(),
+});
+export type ProcurementPatch = z.infer<typeof ProcurementPatchSchema>;
 
 /* ---------------------------------------------------------------------------
    Attachments & stock
