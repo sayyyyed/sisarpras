@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import { StockMovementDraftSchema } from "@sisarpras/domain";
-import { requireAuth, requireRole } from "@/middleware/auth";
+import { requireAuth, requireMenuAccess, requireRole } from "@/middleware/auth";
 import { createStockMovement, listStockItems, listStockMovements, StockError } from "@/repositories/stock";
 
 export const stockRoute = new Hono();
+stockRoute.use("*", requireAuth, requireMenuAccess("stock"));
 
 stockRoute.get("/", requireAuth, async (c) => c.json({ data: await listStockItems() }));
 

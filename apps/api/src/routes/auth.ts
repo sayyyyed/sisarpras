@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "@/db/client";
-import { users } from "@/db/schema";
+import { appMenus, roles, users } from "@/db/schema";
 import { requireAuth, requireRole, currentUser } from "@/middleware/auth";
 import { hashPin, verifyPin } from "@/lib/password";
 import { createToken } from "@/lib/tokens";
@@ -11,10 +11,18 @@ import { createToken } from "@/lib/tokens";
 export const authRoute = new Hono();
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 const pinSchema = z.string().regex(/^\d{6}$/, "PIN harus 6 digit");
-const roleSchema = z.enum(["admin", "operator", "viewer"]);
 const loginSchema = z.object({ pin: pinSchema });
-const createUserSchema = z.object({ name: z.string().trim().min(1).max(255), role: roleSchema, pin: pinSchema });
-const updateUserSchema = z.object({ name: z.string().trim().min(1).max(255).optional(), role: roleSchema.optional(), pin: pinSchema.optional() }).refine((value) => Object.keys(value).length > 0);
+const createUserSchema = z.object({ name: z.string().trim().min(1).max(255), roleId: z.string().uuid(), pin: pinSchema });
+const updateUserSchema = z.object({ name: z.string().trim().min(1).max(255).optional(), roleId: z.string().uuid().optional(), pin: pinSchema.optional() }).refine((value) => Object.keys(value).length > 0);
+
+async function publicUser(userId: string) {
+  const [record] = await db.select({ id: users.id, name: users.name, role: users.role, roleId: roles.id, roleKey: roles.key, roleName: roles.name, menuKeys: roles.menuKeys, createdAt: users.createdAt, isActive: users.isActive })
+    .from(users).innerJoin(roles, eq(users.roleId, roles.id)).where(eq(users.id, userId)).limit(1);
+  if (!record) return null;
+  const enabled = await db.select({ key: appMenus.key }).from(appMenus).where(eq(appMenus.enabled, true));
+  const enabledKeys = new Set(enabled.map((item) => item.key));
+  return { ...record, menuKeys: (record.role === "admin" ? [...enabledKeys] : record.menuKeys).filter((key) => enabledKeys.has(key)) };
+}
 
 async function pinAlreadyInUse(pin: string, exceptId?: string): Promise<boolean> {
   const candidates = await db.select({ id: users.id, pinHash: users.pinHash }).from(users)
@@ -46,7 +54,8 @@ authRoute.post("/login", async (c) => {
     return c.json({ error: "invalid_pin" }, 401);
   }
   loginAttempts.delete(address);
-  const user = { id: matched.id, name: matched.name, role: matched.role };
+  const user = await publicUser(matched.id);
+  if (!user) return c.json({ error: "role_not_configured" }, 409);
   return c.json({ token: createToken(user), user, expiresIn: 43200 });
 });
 
@@ -55,25 +64,30 @@ authRoute.use("/users/*", requireAuth, requireRole("admin"));
 authRoute.get("/me", requireAuth, async (c) => c.json({ user: currentUser(c) }));
 
 authRoute.get("/users", async (c) => {
-  const rows = await db.select({ id: users.id, name: users.name, role: users.role, createdAt: users.createdAt, isActive: users.isActive }).from(users).where(eq(users.isActive, true)).orderBy(users.createdAt);
-  return c.json({ data: rows });
+  const rows = await db.select({ id: users.id }).from(users).where(eq(users.isActive, true)).orderBy(users.createdAt);
+  const values = await Promise.all(rows.map((row) => publicUser(row.id)));
+  return c.json({ data: values.filter(Boolean) });
 });
 
 authRoute.post("/users", async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = createUserSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "validation_failed", issues: parsed.error.issues }, 400);
+  const [assignedRole] = await db.select().from(roles).where(eq(roles.id, parsed.data.roleId)).limit(1);
+  if (!assignedRole) return c.json({ error: "role_not_found" }, 404);
+  if (assignedRole.accessLevel === "admin") return c.json({ error: "admin_role_assignment_locked" }, 403);
   if (await pinAlreadyInUse(parsed.data.pin)) return c.json({ error: "pin_already_in_use" }, 409);
   const id = randomUUID();
   const [created] = await db.insert(users).values({
     id,
     email: `${id}@pin.sisarpras.local`,
     name: parsed.data.name,
-    role: parsed.data.role,
+    role: assignedRole.accessLevel,
+    roleId: assignedRole.id,
     passwordHash: "!pin-only",
     pinHash: await hashPin(parsed.data.pin),
   }).returning({ id: users.id, name: users.name, role: users.role, createdAt: users.createdAt, isActive: users.isActive });
-  return c.json({ data: created }, 201);
+  return c.json({ data: await publicUser(created.id) }, 201);
 });
 
 authRoute.patch("/users/:id", async (c) => {
@@ -83,18 +97,21 @@ authRoute.patch("/users/:id", async (c) => {
   const { id } = c.req.param();
   const [target] = await db.select().from(users).where(eq(users.id, id)).limit(1);
   if (!target) return c.json({ error: "user_not_found" }, 404);
+  const [assignedRole] = parsed.data.roleId ? await db.select().from(roles).where(eq(roles.id, parsed.data.roleId)).limit(1) : [null];
+  if (parsed.data.roleId && !assignedRole) return c.json({ error: "role_not_found" }, 404);
+  if (assignedRole?.accessLevel === "admin" && target.role !== "admin") return c.json({ error: "admin_role_assignment_locked" }, 403);
   if (parsed.data.pin && await pinAlreadyInUse(parsed.data.pin, id)) return c.json({ error: "pin_already_in_use" }, 409);
-  if (target.role === "admin" && parsed.data.role && parsed.data.role !== "admin") {
+  if (target.role === "admin" && assignedRole && assignedRole.accessLevel !== "admin") {
     const [count] = await db.select({ value: sql<number>`count(*)` }).from(users).where(and(eq(users.role, "admin"), eq(users.isActive, true)));
     if (Number(count?.value ?? 0) <= 1) return c.json({ error: "last_admin_required" }, 409);
   }
   const [updated] = await db.update(users).set({
     ...(parsed.data.name ? { name: parsed.data.name } : {}),
-    ...(parsed.data.role ? { role: parsed.data.role } : {}),
+    ...(assignedRole ? { role: assignedRole.accessLevel, roleId: assignedRole.id } : {}),
     ...(parsed.data.pin ? { pinHash: await hashPin(parsed.data.pin) } : {}),
     updatedAt: new Date(),
-  }).where(eq(users.id, id)).returning({ id: users.id, name: users.name, role: users.role, createdAt: users.createdAt, isActive: users.isActive });
-  return c.json({ data: updated });
+  }).where(eq(users.id, id)).returning({ id: users.id });
+  return c.json({ data: await publicUser(updated.id) });
 });
 
 authRoute.delete("/users/:id", async (c) => {

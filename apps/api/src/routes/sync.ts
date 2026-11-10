@@ -1,13 +1,15 @@
-import { asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { AssetDraftSchema, LocationDraftSchema } from "@sisarpras/domain";
 import { db } from "@/db/client";
-import { assets, devices, locations, processedMutations, syncChanges } from "@/db/schema";
+import { assetLoans, assetRoomStocks, assets, devices, locations, processedMutations, syncChanges } from "@/db/schema";
 import { currentSyncCursor } from "@/repositories/assets";
-import { currentUser, requireAuth, requireRole } from "@/middleware/auth";
+import { currentUser, requireAuth, requireMenuAccess, requireRole } from "@/middleware/auth";
 
 export const syncRoute = new Hono();
+syncRoute.use("/push", requireAuth, requireMenuAccess("sync"));
+syncRoute.use("/pull", requireAuth, requireMenuAccess("sync"));
 const pushSchema = z.object({
   deviceId: z.string().uuid(),
   deviceName: z.string().trim().min(1).max(255).default("Desktop"),
@@ -55,10 +57,21 @@ syncRoute.post("/push", requireAuth, requireRole("admin", "operator"), async (c)
           if (current) return { status: "conflict", version: current.version, error: "entity_exists" };
           const draft = AssetDraftSchema.safeParse(mutation.payload);
           if (!draft.success) return { status: "failed", error: "invalid_payload" };
+          const { roomStocks: draftRoomStocks, ...assetDraft } = draft.data;
+          const raw = mutation.payload && typeof mutation.payload === "object" ? mutation.payload as Record<string, unknown> : {};
+          const legacy = !Object.hasOwn(raw, "stockQuantity");
+          let roomStocks = draftRoomStocks;
+          if (legacy && draft.data.locationId) {
+            const [location] = await tx.select().from(locations).where(eq(locations.id, draft.data.locationId)).limit(1);
+            if (location?.kind === "room") roomStocks = [{ locationId: location.id, quantity: 1 }];
+          }
+          const stockQuantity = legacy ? 1 : draft.data.stockQuantity;
+          if (roomStocks.reduce((sum, item) => sum + item.quantity, 0) > stockQuantity) return { status: "failed", error: "used_exceeds_stock" };
           const now = new Date();
-          const [created] = await tx.insert(assets).values({ ...draft.data, id: mutation.entityId, version: 1, createdBy: actor.id, createdAt: now, updatedAt: now })
+          const [created] = await tx.insert(assets).values({ ...assetDraft, stockQuantity, id: mutation.entityId, version: 1, createdBy: actor.id, createdAt: now, updatedAt: now })
             .returning();
-          await tx.insert(syncChanges).values({ entityType: "asset", entityId: created.id, operation: "create", version: created.version, payload: created, deviceId, actorId: actor.id });
+          if (roomStocks.length) await tx.insert(assetRoomStocks).values(roomStocks.map((item) => ({ assetId: created.id, ...item })));
+          await tx.insert(syncChanges).values({ entityType: "asset", entityId: created.id, operation: "create", version: created.version, payload: { ...created, roomStocks }, deviceId, actorId: actor.id });
           await tx.insert(processedMutations).values({ mutationId: mutation.mutationId, deviceId, entityType: "asset", entityId: mutation.entityId, result: { status: "acked", version: created.version } });
           return { status: "acked", version: created.version };
         }
@@ -72,8 +85,22 @@ syncRoute.post("/push", requireAuth, requireRole("admin", "operator"), async (c)
         }
         const draft = AssetDraftSchema.safeParse(mutation.payload);
         if (!draft.success) return { status: "failed", error: "invalid_payload" };
-        const [updated] = await tx.update(assets).set({ ...draft.data, version: current.version + 1, updatedAt: new Date() }).where(eq(assets.id, current.id)).returning();
-        await tx.insert(syncChanges).values({ entityType: "asset", entityId: current.id, operation: "update", version: updated.version, payload: updated, deviceId, actorId: actor.id });
+        const { roomStocks: draftRoomStocks, ...parsedAsset } = draft.data;
+        const raw = mutation.payload && typeof mutation.payload === "object" ? mutation.payload as Record<string, unknown> : {};
+        const existingAllocations = await tx.select().from(assetRoomStocks).where(eq(assetRoomStocks.assetId, current.id));
+        const stockQuantity = Object.hasOwn(raw, "stockQuantity") ? draft.data.stockQuantity : current.stockQuantity;
+        const roomStocks = Object.hasOwn(raw, "roomStocks") ? draftRoomStocks : existingAllocations.map(({ locationId, quantity }) => ({ locationId, quantity }));
+        const activeLoans = await tx.select({ quantity: assetLoans.quantity }).from(assetLoans).where(and(eq(assetLoans.assetId, current.id), isNull(assetLoans.returnedAt)));
+        if (roomStocks.reduce((sum, item) => sum + item.quantity, 0) + activeLoans.reduce((sum, item) => sum + item.quantity, 0) > stockQuantity) return { status: "failed", error: "used_exceeds_stock" };
+        const assetDraft = {
+          ...parsedAsset,
+          stockQuantity,
+          locationId: Object.hasOwn(raw, "locationId") ? parsedAsset.locationId : current.locationId,
+        };
+        const [updated] = await tx.update(assets).set({ ...assetDraft, version: current.version + 1, updatedAt: new Date() }).where(eq(assets.id, current.id)).returning();
+        await tx.delete(assetRoomStocks).where(eq(assetRoomStocks.assetId, current.id));
+        if (roomStocks.length) await tx.insert(assetRoomStocks).values(roomStocks.map((item) => ({ assetId: current.id, ...item })));
+        await tx.insert(syncChanges).values({ entityType: "asset", entityId: current.id, operation: "update", version: updated.version, payload: { ...updated, roomStocks }, deviceId, actorId: actor.id });
         await tx.insert(processedMutations).values({ mutationId: mutation.mutationId, deviceId, entityType: "asset", entityId: current.id, result: { status: "acked", version: updated.version } });
         return { status: "acked", version: updated.version };
       }
