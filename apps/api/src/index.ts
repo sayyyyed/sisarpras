@@ -1,12 +1,15 @@
-import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { pingDatabase } from "@/db/client";
 import { assetsRoute } from "@/routes/assets";
 import { locationsRoute } from "@/routes/locations";
+import { procurementRoute } from "@/routes/procurement";
 import { stockRoute } from "@/routes/stock";
+import { loansRoute } from "@/routes/loans";
 import { syncRoute } from "@/routes/sync";
 import { authRoute } from "@/routes/auth";
+import { attachmentsRoute } from "@/routes/attachments";
+import { accessRoute } from "@/routes/access";
 
 const app = new Hono();
 
@@ -32,13 +35,14 @@ app.get("/health", async (c) => {
 app.route("/v1/assets", assetsRoute);
 app.route("/v1/locations", locationsRoute);
 app.route("/v1/stock", stockRoute);
+app.route("/v1/loans", loansRoute);
+app.route("/v1/procurement", procurementRoute);
 app.route("/v1/auth", authRoute);
 app.route("/v1/sync", syncRoute);
-
-const port = Number(process.env.PORT ?? 8787);
-
-serve({ fetch: app.fetch, port }, (info) => {
-  console.log(`SI SARPRAS API siap di http://localhost:${info.port}`);
-});
+app.route("/v1/attachments", attachmentsRoute);
+app.route("/v1/access", accessRoute);
 
 export default app;
+
+// Cloudflare Workers named entry point. Keep the Node adapter in dev.ts for local use.
+export const fetch = app.fetch;

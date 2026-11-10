@@ -26,6 +26,14 @@ export const userRoleEnum = pgEnum("user_role", ["admin", "operator", "viewer"])
 export const mutationOperationEnum = pgEnum("mutation_operation", ["create", "update", "delete"]);
 export const attachmentEntityEnum = pgEnum("attachment_entity", ["asset", "procurement"]);
 
+export const procurementStatusEnum = pgEnum("procurement_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+  "received",
+]);
+
 /* -----------------------------------------------------------------------------
  * Identity
  * -------------------------------------------------------------------------- */
@@ -37,6 +45,7 @@ export const users = pgTable(
     email: varchar("email", { length: 255 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     role: userRoleEnum("role").notNull().default("viewer"),
+    roleId: uuid("role_id").notNull().references(() => roles.id),
     /** Argon2/bcrypt hash. Never a plaintext password. */
     passwordHash: text("password_hash").notNull(),
     /** Scrypt hash for PIN-only local accounts. */
@@ -48,6 +57,28 @@ export const users = pgTable(
   (table) => [uniqueIndex("users_email_unique").on(table.email)],
 );
 
+/** Configurable named roles retain a capability profile used by API write rules. */
+export const roles = pgTable("roles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: varchar("key", { length: 80 }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: varchar("description", { length: 255 }),
+  accessLevel: userRoleEnum("access_level").notNull().default("viewer"),
+  menuKeys: text("menu_keys").array().notNull().default([]),
+  isSystem: boolean("is_system").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("roles_key_unique").on(table.key)]);
+
+/** Global menu switches; required entries cannot be disabled by the UI/API. */
+export const appMenus = pgTable("app_menus", {
+  key: varchar("key", { length: 80 }).primaryKey(),
+  label: varchar("label", { length: 100 }).notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  required: boolean("required").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /* -----------------------------------------------------------------------------
  * Reference data
  * -------------------------------------------------------------------------- */
@@ -58,6 +89,7 @@ export const assetCategories = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     code: varchar("code", { length: 20 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
+    active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex("asset_categories_code_unique").on(table.code)],
@@ -74,6 +106,7 @@ export const locations = pgTable(
     building: varchar("building", { length: 255 }),
     floor: varchar("floor", { length: 100 }),
     capacity: integer("capacity"),
+    active: boolean("active").notNull().default(true),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -94,7 +127,8 @@ export const assets = pgTable(
     name: varchar("name", { length: 255 }).notNull(),
 
     categoryId: uuid("category_id").notNull().references(() => assetCategories.id),
-    locationId: uuid("location_id").notNull().references(() => locations.id),
+    locationId: uuid("location_id").references(() => locations.id),
+    stockQuantity: integer("stock_quantity").notNull().default(0),
 
     serialNumber: varchar("serial_number", { length: 150 }),
     description: text("description"),
@@ -124,6 +158,31 @@ export const assets = pgTable(
     index("assets_updated_at_idx").on(table.updatedAt),
   ],
 );
+
+/** Number of units from an asset item currently used in each room. */
+export const assetRoomStocks = pgTable(
+  "asset_room_stocks",
+  {
+    assetId: uuid("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id").notNull().references(() => locations.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("asset_room_stocks_asset_location_unique").on(table.assetId, table.locationId), index("asset_room_stocks_location_idx").on(table.locationId)],
+);
+
+/** Active and historical loans of unallocated asset stock. */
+export const assetLoans = pgTable("asset_loans", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  assetId: uuid("asset_id").notNull().references(() => assets.id),
+  borrowerName: varchar("borrower_name", { length: 255 }).notNull(),
+  quantity: integer("quantity").notNull(),
+  startDate: date("start_date").notNull(),
+  dueDate: date("due_date").notNull(),
+  returnedAt: timestamp("returned_at", { withTimezone: true }),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [index("asset_loans_asset_active_idx").on(table.assetId, table.returnedAt), index("asset_loans_due_date_idx").on(table.dueDate)]);
 
 /** Custody history. Phase 2 in the blueprint but the table is cheap to carry. */
 export const assetAssignments = pgTable(
@@ -189,7 +248,37 @@ export const stockMovements = pgTable(
 );
 
 /* -----------------------------------------------------------------------------
- * Attachments
+ * Procurement (pengadaan)
+ * -------------------------------------------------------------------------- */
+
+export const procurementRequests = pgTable(
+  "procurement_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    reference: varchar("reference", { length: 50 }).notNull(),
+    itemName: varchar("item_name", { length: 255 }).notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    vendor: varchar("vendor", { length: 255 }),
+    proposedPriceIdr: bigint("proposed_price_idr", { mode: "number" }).notNull(),
+    approvedPriceIdr: bigint("approved_price_idr", { mode: "number" }),
+    requestedAt: date("requested_at").notNull(),
+    status: procurementStatusEnum("status").notNull().default("submitted"),
+    notes: text("notes"),
+    requestedBy: uuid("requested_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("procurement_requests_reference_unique").on(table.reference),
+    index("procurement_requests_status_idx").on(table.status),
+    index("procurement_requests_created_idx").on(table.createdAt),
+  ],
+);
+
+/* -----------------------------------------------------------------------------
+ * Attachments — metadata only. The bytes stay on the device that uploaded
+ * them (IndexedDB / desktop SQLite), never on a public URL.
  * -------------------------------------------------------------------------- */
 
 export const attachments = pgTable(
